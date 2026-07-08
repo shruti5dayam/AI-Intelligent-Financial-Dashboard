@@ -19,8 +19,11 @@ import pandas as pd
 import streamlit as st
 
 from config import APP_CAPTION, APP_TITLE
+from dashboard.charts import render_dashboard_charts
+from dashboard.kpi_cards import render_financial_kpis, render_mapping_kpis
 from dashboard.metadata_panel import render_metadata_panel
 from dashboard.scope_panel import render_scope_panel
+from dashboard.styling import apply_dashboard_styles
 from dashboard.upload_panel import render_upload_panel
 from ingestion.coa_reader import read_coa_file
 from ingestion.file_reader import read_uploaded_bank_files
@@ -264,7 +267,14 @@ def render_pipeline_results(results: dict) -> None:
         Renders Streamlit UI.
     """
 
-    render_pipeline_kpis(results)
+    render_financial_kpis(results)
+    render_mapping_kpis(results)
+    render_dashboard_charts(results)
+
+    validation_summary = results.get("validation_summary", {})
+
+    with st.expander("Debug: Pipeline Internals", expanded=False):
+        st.json(validation_summary)
 
     pnl_df = results.get("pnl_df", pd.DataFrame())
     trial_balance_df = results.get("trial_balance_df", pd.DataFrame())
@@ -380,6 +390,8 @@ st.set_page_config(
     page_icon="🤖",
     layout="wide",
 )
+
+apply_dashboard_styles()
 
 st.title(f"🤖 {APP_TITLE}")
 st.caption(APP_CAPTION)
