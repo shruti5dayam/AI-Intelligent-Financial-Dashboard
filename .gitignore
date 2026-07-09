@@ -12,4 +12,4 @@ data/uploads/*
 output/reports/*
 !output/reports/.gitkeep
 
-.streamlit/
+.streamlit/ 
