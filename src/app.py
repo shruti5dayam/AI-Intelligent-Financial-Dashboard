@@ -20,8 +20,12 @@ import streamlit as st
 
 from config import APP_CAPTION, APP_TITLE
 from dashboard.charts import render_dashboard_charts
-from dashboard.kpi_cards import render_financial_kpis, render_mapping_kpis
-from dashboard.metadata_panel import render_metadata_panel
+from dashboard.kpi_cards import (
+    render_financial_kpis,
+    render_financial_status_panel,
+    render_mapping_kpis,
+    render_metadata_kpis,
+)
 from dashboard.scope_panel import render_scope_panel
 from dashboard.styling import apply_dashboard_styles
 from dashboard.upload_panel import render_upload_panel
@@ -251,47 +255,118 @@ def render_pipeline_kpis(results: dict) -> None:
     with st.expander("Debug: Pipeline Internals", expanded=False):
         st.json(validation_summary)
 
-
-def render_pipeline_results(results: dict) -> None:
+def render_dashboard_navigation(developer_mode: bool) -> str:
     """
-    Render pipeline outputs in dashboard tabs.
+    Render horizontal dashboard navigation.
+
+    Parameters
+    ----------
+    developer_mode:
+        Whether developer debug tools should be visible.
+
+    Returns
+    -------
+    str
+        Selected dashboard view.
+    """
+
+    view_options = [
+        "Overview",
+        "Reports",
+        "Transactions",
+        "Exceptions",
+    ]
+
+    if developer_mode:
+        view_options.append("Developer Debug")
+
+    st.markdown(
+        """
+        <div class="dashboard-nav-container">
+            <div class="dashboard-nav-title">Dashboard View</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    return st.radio(
+        "Dashboard View",
+        view_options,
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
+
+def render_overview_view(
+    results: dict | None,
+    metadata: dict,
+    bank_df: pd.DataFrame,
+) -> None:
+    """
+    Render the executive overview page.
 
     Parameters
     ----------
     results:
-        Pipeline result dictionary.
+        Financial pipeline results.
+
+    metadata:
+        Detected bank statement metadata.
 
     Returns
     -------
     None
-        Renders Streamlit UI.
+        Renders overview dashboard.
     """
+
+    render_metadata_kpis(
+        metadata=metadata,
+        bank_df=bank_df,
+    )
+
+    if results is None:
+        st.info(
+            "Upload rules and Chart of Accounts, then click Generate "
+            "Financial Report to see financial KPIs and charts."
+        )
+        return
 
     render_financial_kpis(results)
     render_mapping_kpis(results)
     render_dashboard_charts(results)
 
-    validation_summary = results.get("validation_summary", {})
 
-    with st.expander("Debug: Pipeline Internals", expanded=False):
-        st.json(validation_summary)
+def render_reports_view(results: dict | None) -> None:
+    """
+    Render financial reports page.
+
+    Parameters
+    ----------
+    results:
+        Financial pipeline results.
+
+    Returns
+    -------
+    None
+        Renders P&L and Trial Balance reports.
+    """
+
+    st.markdown(
+        '<div class="section-title">Financial Reports</div>',
+        unsafe_allow_html=True,
+    )
+
+    if results is None:
+        st.warning("Generate the financial report to view P&L and Trial Balance.")
+        return
 
     pnl_df = results.get("pnl_df", pd.DataFrame())
     trial_balance_df = results.get("trial_balance_df", pd.DataFrame())
-    mapped_transactions_df = results.get(
-        "mapped_transactions_df",
-        pd.DataFrame(),
-    )
-    unmatched_df = results.get("unmatched_df", pd.DataFrame())
-    missing_coa_df = results.get("missing_coa_df", pd.DataFrame())
 
-    tab_pnl, tab_tb, tab_transactions, tab_unmatched, tab_missing_coa = st.tabs(
+    tab_pnl, tab_tb = st.tabs(
         [
             "Profit & Loss",
             "Trial Balance",
-            "Mapped Transactions",
-            "Unmatched",
-            "Missing COA",
         ]
     )
 
@@ -346,17 +421,79 @@ def render_pipeline_results(results: dict) -> None:
                 ),
             )
 
-    with tab_transactions:
-        st.subheader("Mapped Transactions")
 
-        if mapped_transactions_df.empty:
-            st.warning("No mapped transaction data available.")
-        else:
-            st.dataframe(
-                make_display_safe(mapped_transactions_df),
-                width="stretch",
-                hide_index=True,
-            )
+def render_transactions_view(results: dict | None) -> None:
+    """
+    Render mapped transactions page.
+
+    Parameters
+    ----------
+    results:
+        Financial pipeline results.
+
+    Returns
+    -------
+    None
+        Renders mapped transaction details.
+    """
+
+    st.markdown(
+        '<div class="section-title">Mapped Transactions</div>',
+        unsafe_allow_html=True,
+    )
+
+    if results is None:
+        st.warning("Generate the financial report to view mapped transactions.")
+        return
+
+    mapped_transactions_df = results.get(
+        "mapped_transactions_df",
+        pd.DataFrame(),
+    )
+
+    if mapped_transactions_df.empty:
+        st.warning("No mapped transaction data available.")
+    else:
+        st.dataframe(
+            make_display_safe(mapped_transactions_df),
+            width="stretch",
+            hide_index=True,
+        )
+
+
+def render_exceptions_view(results: dict | None) -> None:
+    """
+    Render exceptions page.
+
+    Parameters
+    ----------
+    results:
+        Financial pipeline results.
+
+    Returns
+    -------
+    None
+        Renders unmatched and missing COA transactions.
+    """
+
+    st.markdown(
+        '<div class="section-title">Exception Review</div>',
+        unsafe_allow_html=True,
+    )
+
+    if results is None:
+        st.warning("Generate the financial report to review exceptions.")
+        return
+
+    unmatched_df = results.get("unmatched_df", pd.DataFrame())
+    missing_coa_df = results.get("missing_coa_df", pd.DataFrame())
+
+    tab_unmatched, tab_missing_coa = st.tabs(
+        [
+            "Unmatched Transactions",
+            "Missing COA Mappings",
+        ]
+    )
 
     with tab_unmatched:
         st.subheader("Unmatched Transactions")
@@ -383,6 +520,127 @@ def render_pipeline_results(results: dict) -> None:
                 width="stretch",
                 hide_index=True,
             )
+
+
+def render_developer_debug_view(
+    metadata: dict,
+    report_scope: dict,
+    bank_df: pd.DataFrame,
+    results: dict | None,
+) -> None:
+    """
+    Render developer-only debug page.
+
+    Parameters
+    ----------
+    metadata:
+        Detected metadata.
+
+    report_scope:
+        Selected report scope.
+
+    bank_df:
+        Uploaded and cleaned bank DataFrame.
+
+    results:
+        Financial pipeline results.
+
+    Returns
+    -------
+    None
+        Renders debug information.
+    """
+
+    st.markdown(
+        '<div class="section-title">Developer Debug</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.warning(
+        "This page is for development and testing only. "
+        "Hide this for manager/client demos."
+    )
+
+    with st.expander("Detected Metadata", expanded=False):
+        st.write(metadata)
+
+    with st.expander("Selected Report Scope", expanded=False):
+        st.json(report_scope)
+
+    with st.expander("Preview Uploaded Bank Data", expanded=False):
+        preview_df = make_display_safe(bank_df.head(50))
+
+        st.dataframe(
+            preview_df,
+            width="stretch",
+            hide_index=True,
+        )
+
+    if results is not None:
+        validation_summary = results.get("validation_summary", {})
+
+        with st.expander("Pipeline Internals", expanded=False):
+            st.json(validation_summary)
+
+
+def render_pipeline_results(
+    results: dict | None,
+    metadata: dict,
+    report_scope: dict,
+    bank_df: pd.DataFrame,
+    developer_mode: bool,
+) -> None:
+    """
+    Render dashboard content based on selected dashboard view.
+
+    Parameters
+    ----------
+    results:
+        Financial pipeline result dictionary.
+
+    metadata:
+        Detected bank statement metadata.
+
+    report_scope:
+        Selected report scope.
+
+    bank_df:
+        Uploaded and cleaned bank DataFrame.
+
+    developer_mode:
+        Whether developer debug page should be available.
+
+    Returns
+    -------
+    None
+        Renders selected dashboard view.
+    """
+
+    dashboard_view = render_dashboard_navigation(developer_mode)
+
+    if dashboard_view == "Overview":
+        render_overview_view(
+            results=results,
+            metadata=metadata,
+            bank_df=bank_df,
+        )
+
+    elif dashboard_view == "Reports":
+        render_reports_view(results)
+
+    elif dashboard_view == "Transactions":
+        render_transactions_view(results)
+
+    elif dashboard_view == "Exceptions":
+        render_exceptions_view(results)
+
+    elif dashboard_view == "Developer Debug":
+        render_developer_debug_view(
+            metadata=metadata,
+            report_scope=report_scope,
+            bank_df=bank_df,
+            results=results,
+        )
 
 
 st.set_page_config(
@@ -423,24 +681,12 @@ except Exception as error:
     st.stop()
 
 
-render_metadata_panel(metadata)
-
 report_scope = render_scope_panel(metadata)
 
-
-st.subheader("Selected Report Scope")
-st.json(report_scope)
-
-
-with st.expander("Preview Uploaded Bank Data", expanded=False):
-    preview_df = make_display_safe(bank_df.head(50))
-
-    st.dataframe(
-        preview_df,
-        width="stretch",
-        hide_index=True,
-    )
-
+developer_mode = st.sidebar.checkbox(
+    "Developer Mode",
+    value=False,
+)
 
 st.divider()
 
@@ -493,11 +739,17 @@ if run_button:
 
 results = st.session_state.get(PIPELINE_RESULTS_KEY)
 
-if results:
-    render_pipeline_results(results)
-else:
-    st.subheader("Day 2 Status")
-    st.info(
-        "Upload bank statements, rules, and Chart of Accounts. "
-        "Select the report scope, then click Generate Financial Report."
-    )
+render_financial_status_panel(
+    uploaded_bank_files=uploaded_bank_files,
+    uploaded_rules_file=uploaded_rules_file,
+    uploaded_coa_file=uploaded_coa_file,
+    results=results,
+)
+
+render_pipeline_results(
+    results=results,
+    metadata=metadata,
+    report_scope=report_scope,
+    bank_df=bank_df,
+    developer_mode=developer_mode,
+)
